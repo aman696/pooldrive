@@ -1,93 +1,43 @@
-# Create an SSD + HDD pool on Ubuntu
+# Drive operation and troubleshooting
 
-These steps use already formatted disks. For an existing installation with `/srv/storage/Files` mounted, continue with [the web installer](../README.md#use-an-existing-pool).
+[Quick start](../README.md#quick-start) handles a fresh install. The extra disk can be an HDD or SSD. To keep mount paths compatible with existing PoolDrive setups, the installer calls the extra disk's path `/srv/pool/hdd` in both cases.
 
-Run the commands as the ordinary account that will own the pool, using sudo where shown.
+## Remove or reconnect the extra drive
+
+1. Finish any transfers to or from the drive and close open files.
+2. On the server, run `sudo systemctl stop srv-pool-hdd.mount`. Verify `findmnt --mountpoint /srv/pool/hdd` returns no mount before unplugging. If the stop fails, close any processes holding files open and retry.
+3. Refresh the browser after ten seconds. Expect **Unavailable** in `HDD-status.txt` and continued access to a known internal-drive file.
+4. Reinsert the drive. The udev rule asks systemd to mount it by UUID. The monitor reattaches its branch when it sees the right filesystem mounted read/write. Check for **Online** and verify a known extra-drive file is visible again.
+
+If you stopped the mount but left the drive plugged in, start it manually with `sudo systemctl start srv-pool-hdd.mount`.
+
+## Diagnose
 
 ```bash
-sudo apt install mergerfs attr
 lsblk -o NAME,SIZE,MODEL,FSTYPE,UUID,MOUNTPOINTS
-id -u
-id -g
-```
-
-Identify the external filesystem's UUID and the numeric UID/GID of your storage user. Take a backup of the HDD's files before changing mount configuration.
-
-```bash
-sudo install -d -m 0755 /srv/storage /srv/pool/hdd
-sudo install -d -m 0555 /srv/storage/Files
-sudo install -d -o "$USER" -g "$(id -gn)" -m 0750 /srv/pool/ssd
-sudo cp -a /etc/fstab /etc/fstab.before-pooldrive
-sudoedit /etc/fstab
-```
-
-Add these lines once. Replace `HDD_UUID`, `YOUR_UID` and `YOUR_GID`. The first line is for an **exFAT** HDD.
-
-```fstab
-UUID=HDD_UUID /srv/pool/hdd exfat defaults,nofail,x-systemd.device-bound,x-systemd.device-timeout=10s,uid=YOUR_UID,gid=YOUR_GID,fmask=0137,dmask=0027 0 0
-/srv/pool/ssd /srv/storage/Files mergerfs defaults,nofail,allow_other,category.create=mfs,minfreespace=50G 0 0
-```
-
-For an **ext4** HDD, use the following first line instead. Once mounted, grant your storage user ownership of the new `PoolFiles` directory using `sudo chown "$USER:$(id -gn)" /srv/pool/hdd/PoolFiles`.
-
-```fstab
-UUID=HDD_UUID /srv/pool/hdd ext4 defaults,nofail,x-systemd.device-bound,x-systemd.device-timeout=10s 0 2
-```
-
-Reload the mount definitions, then verify that the HDD is the expected filesystem before creating its pool folder. Substitute your actual UUID in the following block.
-
-```bash
-HDD_UUID='replace-with-your-hdd-filesystem-uuid'
-sudo systemctl daemon-reload
-sudo systemctl start srv-pool-hdd.mount &&
-  findmnt -n -M /srv/pool/hdd -S "UUID=$HDD_UUID" &&
-  sudo mkdir -p /srv/pool/hdd/PoolFiles &&
-  sudo systemctl start srv-storage-Files.mount
-```
-
-Existing HDD data outside `PoolFiles` stays outside the share. Move only the files you want to share into that directory. The `PoolFiles` branch is inside the mounted HDD so the branch path disappears when the HDD is unmounted.
-
-## Configure HDD detection
-
-Run this from the repository root, with the real `HDD_UUID` still set in your shell.
-
-```bash
-sudo install -d -m 0755 /etc/pooldrive
-printf 'HDD_UUID=%s\n' "$HDD_UUID" | sudo tee /etc/pooldrive/hdd.env
-sudo install -m 0755 pool/hdd-state.sh /usr/local/sbin/pooldrive-hdd-state
-sudo install -m 0644 pool/pooldrive-hdd-state.{service,timer} /etc/systemd/system/
-printf 'ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="%s", TAG+="systemd", ENV{SYSTEMD_WANTS}+="srv-pool-hdd.mount"\n' "$HDD_UUID" |
-  sudo tee /etc/udev/rules.d/99-pooldrive-hdd.rules
-sudo udevadm control --reload-rules
-sudo systemctl daemon-reload
-sudo systemctl start pooldrive-hdd-state.service
-sudo systemctl enable --now pooldrive-hdd-state.timer
-cat /srv/storage/HDD-status.txt
+findmnt --mountpoint /srv/storage/Files
+findmnt --mountpoint /srv/pool/hdd
 df -hT /srv/storage/Files
+cat /srv/storage/HDD-status.txt
+getfattr --only-values -n user.mergerfs.branches /srv/storage/Files/.mergerfs
+systemctl status pooldrive-web.service --no-pager
+journalctl -u pooldrive-web.service -u pooldrive-hdd-state.service -n 50 --no-pager
 ```
 
-Check the status after boot and after reinserting the HDD. For the removal test, finish file transfers, stop `srv-pool-hdd.mount`, and verify that `findmnt --mountpoint /srv/pool/hdd` shows no mount before unplugging. Refresh the browser after ten seconds. Expect **Unavailable** and continued access to a known SSD file. Reinsert the drive and check that **Online** and a known HDD file return. An unplug during writes can interrupt them.
+- **Online but files are missing.** List `/srv/pool/hdd/PoolFiles` and `/srv/storage/Files` from the server. Existing files at the root of the drive remain outside the pool until you move them into `PoolFiles`.
+- **Drive detected but unavailable.** Check for a read/write mount at `/srv/pool/hdd` with the expected UUID. If the disk needs repair, unmount it and follow the filesystem's repair procedure after checking your backup.
+- **Web ports occupied.** Run `sudo ss -ltnp '( sport = :8080 or sport = :8081 )'` and identify the process before retrying.
+- **Web sign-in works but uploads fail.** Open **Files** and confirm the Unix storage user can write to the underlying directories. On ext4, files retain the Unix ownership and modes from their original locations. On exFAT, setup supplies the ownership and mode mask at mount time.
+- **Samba login fails.** Run `sudo smbpasswd -a YOUR_STORAGE_USER` and use the resulting Samba credentials. If the share is reachable but free space looks wrong, check `sudo /usr/local/sbin/pooldrive-dfree /srv/storage`.
+- **Web and Samba show different data.** Check that the SFTPGo user has `/srv/storage` as their home and that both clients are in **Files**. Concurrent edits to the same file can conflict.
 
-## Optional Samba access
+## Files changed by setup
 
-Install Samba using `sudo apt install samba`. Append the following section to `/etc/samba/smb.conf`, replacing `YOUR_STORAGE_USER` with your Unix account name.
+- `/etc/fstab` gets the pool mount and, if selected, one extra drive mount. The initial file is copied to `/etc/fstab.before-pooldrive`.
+- `/etc/pooldrive/` stores application and drive settings. `/var/lib/pooldrive/` holds the SFTPGo account database and its application state.
+- Setup installs the browser service, and installs the drive monitor, timer and udev rule when an extra drive is configured.
+- If Samba is selected, setup includes the share from `/etc/pooldrive/samba-share.conf`, retaining the prior configuration at `/etc/samba/smb.conf.before-pooldrive`.
 
-```ini
-[Storage]
-    path = /srv/storage
-    valid users = YOUR_STORAGE_USER
-    guest ok = no
-    read only = no
-    ea support = no
-    store dos attributes = no
-    map archive = no
-    dfree command = /usr/local/sbin/pooldrive-dfree
-```
+If setup stops partway, address the reported error and rerun it with the same options. Setup rejects conflicting mount definitions and an existing Samba share named `Storage`. For a host already configured with mergerfs, follow the [existing pool instructions](../README.md#use-an-existing-pool).
 
-```bash
-sudo install -m 0755 pool/dfree.sh /usr/local/sbin/pooldrive-dfree
-sudo smbpasswd -a "$USER"
-sudo testparm -s && sudo systemctl enable --now smbd && sudo systemctl reload smbd
-```
-
-Open `smb://SERVER_IP/Storage/Files/` from your file manager. The free-space helper reports the pooled mount's capacity even when the client queries the share root.
+Back up `/var/lib/pooldrive` before changing the SFTPGo version or uninstalling. To stop browser access, run `sudo systemctl disable --now pooldrive-web.service`. If you also enabled Tailscale Serve for the browser, inspect `tailscale serve status` and remove the corresponding route.

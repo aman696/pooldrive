@@ -21,7 +21,7 @@ write_status() {
 
 if [ -b "/dev/disk/by-uuid/$HDD_UUID" ] &&
    findmnt -n -M "$hdd" -S "UUID=$HDD_UUID" -O rw >/dev/null &&
-   [ -d "$hdd/PoolFiles" ]; then
+   [ -d "$hdd/PoolFiles" ] && [ ! -L "$hdd/PoolFiles" ]; then
     branches="$branches:$hdd/PoolFiles=RW"
     state=Online
 fi
