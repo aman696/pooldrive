@@ -39,6 +39,21 @@ ssh -N -o ExitOnForwardFailure=yes \
 
 The admin, browser user, and Samba login are separate accounts. The browser listeners bind to loopback. Keep Samba on a trusted LAN or private network.
 
+## Use the Android app
+
+Enable Samba with the `--samba` installer option. Connect your phone to the same home network as the server and install Material Files. [Google Play](https://play.google.com/store/apps/details?id=me.zhanghai.android.files) · [F-Droid](https://f-droid.org/en/packages/me.zhanghai.android.files/)
+
+1. In Material Files, tap **Add storage → SMB Server → Add manually**.
+2. Enter the server's LAN IP as the host and `445` as the port. Use the storage user's Samba username and password.
+3. Tap **Connect and add**, then open **Storage → Files**.
+
+If you need the server's LAN IP, run `ip -br -4 addr` on the server and use the address on its home-network interface.
+
+| Transfer | Steps |
+|---|---|
+| Server to phone | Select the files in **Storage → Files**, tap **Copy**, then paste into your phone's **Download** folder. The copies are available offline. |
+| Phone to server | Select local files, for example from **DCIM → Camera**, tap **Copy**, then paste into **Storage → Files**. |
+
 ## See files already on the extra drive
 
 Only the extra drive's `PoolFiles` folder is shared. To share selected files already on it, confirm the drive is mounted and move the files into that folder from the server. Replace `Photos` with an actual name on the drive and run as the storage user.
@@ -61,7 +76,17 @@ sudo bash scripts/install-web.sh YOUR_STORAGE_USER
 
 ## Access away from home
 
-For private access from an enrolled phone or computer, install Tailscale on the server and the client devices. Sign in to your tailnet and enable MagicDNS and HTTPS certificates. After checking that the browser works over SSH, run this on the server.
+Install Tailscale on the server and the phone or computer you want to connect from. Join both devices to the same tailnet. The server needs to stay awake and connected to the internet while you're away. [Tailscale setup guide](https://tailscale.com/docs/use-cases/personal-or-at-home-use/access-nas-media-file-servers)
+
+### Android app over Tailscale
+
+Connect Tailscale on the phone. Run `tailscale ip -4` on the server, then add a second SMB entry in Material Files with that IP as the host. Use the same port and Samba login as on your home network. Keep TCP port 445 private to your LAN and permitted tailnet devices.
+
+To test from outside your LAN, turn off Wi-Fi on the phone, leave mobile data and Tailscale connected, and copy a small file from **Storage → Files** into **Download**. Download speed depends in part on the server's internet upload speed and whether Tailscale can connect directly. [Tailscale connection types](https://tailscale.com/docs/reference/connection-types)
+
+### Browser over Tailscale
+
+Enable MagicDNS and HTTPS certificates for your tailnet. After checking that the browser works over SSH, run this on the server.
 
 ```bash
 sudo tailscale serve --bg http://127.0.0.1:8080
