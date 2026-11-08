@@ -1,0 +1,10 @@
+[Unit]
+Description=Update the PoolDrive HDD branch and availability
+After=srv-storage-Files.mount
+Wants=srv-storage-Files.mount
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/pooldrive/hdd.env
+ExecStart=/usr/local/sbin/pooldrive-hdd-state
+TimeoutStartSec=15s
