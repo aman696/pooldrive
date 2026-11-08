@@ -27,6 +27,7 @@ config = {
     "ftpd": {"bindings": [{"port": 0}]},
     "webdavd": {"bindings": [{"port": 0}]},
     "telemetry": {"bind_port": 0},
+    "smtp": {"templates_path": str(release / "templates")},
     "data_provider": {
         "driver": "sqlite",
         "name": f"{state}/sftpgo.db",
